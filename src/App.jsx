@@ -469,16 +469,71 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
     return v;
   }
 
+  const totalPixels = rows * targetCols;
+  const brightness = new Float32Array(totalPixels);
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < targetCols; x++) {
+      const idx = y * targetCols + x;
+      const dataIdx = idx * 4;
+      const r = data[dataIdx + 0];
+      const g = data[dataIdx + 1];
+      const b = data[dataIdx + 2];
+      brightness[idx] = bright(r, g, b);
+    }
+  }
+
+  const quantized = new Uint16Array(totalPixels);
+
+  if (n <= 1) {
+    // No ramp variance: all pixels map to the single available glyph.
+    quantized.fill(0);
+    brightness.fill(0);
+  } else {
+    const maxIndex = n - 1;
+    const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < targetCols; x++) {
+        const idx = y * targetCols + x;
+        const oldPixel = brightness[idx];
+        const qIdx = Math.round(oldPixel * maxIndex);
+        const newPixel = qIdx / maxIndex;
+        const error = oldPixel - newPixel;
+
+        brightness[idx] = newPixel;
+        quantized[idx] = qIdx;
+
+        if (x + 1 < targetCols) {
+          const east = idx + 1;
+          brightness[east] = clamp01(brightness[east] + error * (7 / 16));
+        }
+        if (y + 1 < rows) {
+          const south = idx + targetCols;
+          brightness[south] = clamp01(brightness[south] + error * (5 / 16));
+          if (x > 0) {
+            const southwest = south - 1;
+            brightness[southwest] = clamp01(brightness[southwest] + error * (3 / 16));
+          }
+          if (x + 1 < targetCols) {
+            const southeast = south + 1;
+            brightness[southeast] = clamp01(brightness[southeast] + error * (1 / 16));
+          }
+        }
+      }
+    }
+  }
+
   for (let y = 0; y < rows; y++) {
     let rowTxt = "";
     let rowHtml = "";
     for (let x = 0; x < targetCols; x++) {
-      const idx = (y * targetCols + x) * 4;
-      const r = data[idx + 0];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-      const v = bright(r, g, b);
-      const i = Math.min(n - 1, Math.max(0, Math.floor(v * (n - 1))));
+      const idx = y * targetCols + x;
+      const dataIdx = idx * 4;
+      const r = data[dataIdx + 0];
+      const g = data[dataIdx + 1];
+      const b = data[dataIdx + 2];
+      const i = n > 1 ? quantized[idx] : 0;
       const ch = ramp[i];
       rowTxt += ch;
       if (colorize) {
