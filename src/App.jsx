@@ -159,7 +159,7 @@ export default function AsciiArtApp() {
     const lowerName = (file.name || "").toLowerCase();
     const looksHeic = type.includes("heic") || type.includes("heif") || lowerName.endsWith(".heic") || lowerName.endsWith(".heif");
     if (looksHeic) {
-      reportError("HEIC/HEIF isn’t reliably supported here. Please export as JPG/PNG (e.g., share → Save as JPEG, or take a screenshot).”);
+      reportError("HEIC/HEIF isn’t reliably supported here. Please export as JPG/PNG (e.g., share → Save as JPEG, or take a screenshot).");
       // We still try to decode; if it fails, the user will see the error already.
     }
 
