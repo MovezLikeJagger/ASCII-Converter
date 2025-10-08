@@ -234,10 +234,17 @@ export default function AsciiArtApp() {
     }
   }
 
+  function colorizedPreviewHtml(size, html) {
+    if (!html) return "";
+    const family = "ui-monospace, SFMono-Regular, Menlo, monospace";
+    return `<pre style="margin:0; font-family:${family}; font-size:${size}px; line-height:1; white-space:pre;">${html}</pre>`;
+  }
+
   function copyToClipboard() {
     if (!asciiText) return;
     if (colorize && asciiHtml) {
-      const blob = new Blob([asciiHtml], { type: "text/html" });
+      const htmlPayload = colorizedPreviewHtml(fontSize, asciiHtml);
+      const blob = new Blob([htmlPayload], { type: "text/html" });
       const item = new ClipboardItem({ "text/html": blob });
       navigator.clipboard.write([item])
         .then(() => toast("HTML copied ✨"))
@@ -252,7 +259,7 @@ export default function AsciiArtApp() {
 
   function downloadFile() {
     const isHtml = !!colorize;
-    const data = isHtml ? asciiHtml : asciiText;
+    const data = isHtml ? colorizedPreviewHtml(fontSize, asciiHtml) : asciiText;
     if (!data) return;
     const mime = isHtml ? "text/html" : "text/plain";
     const ext = isHtml ? "html" : "txt";
@@ -358,7 +365,7 @@ export default function AsciiArtApp() {
                     {colorize ? (
                       <div
                         style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: `${fontSize}px`, lineHeight: 1 }}
-                        dangerouslySetInnerHTML={{ __html: `<pre style="margin:0; white-space:pre;">${asciiHtml}</pre>` }}
+                        dangerouslySetInnerHTML={{ __html: colorizedPreviewHtml(fontSize, asciiHtml) }}
                       />
                     ) : (
                       <pre
@@ -482,7 +489,10 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
       const ch = ramp[i];
       rowTxt += ch;
       if (colorize) {
-        rowHtml += `<span style="color: rgb(${r},${g},${b})">${escapeHtml(ch)}</span>`;
+        const glyph = ch === " " ? "&nbsp;" : escapeHtml(ch);
+        const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        const textRgb = luminance > 0.6 ? "rgb(0,0,0)" : "rgb(255,255,255)";
+        rowHtml += `<span style="display:inline-block;width:1ch;height:1em;background-color: rgb(${r},${g},${b});color:${textRgb};font-family:inherit;">${glyph}</span>`;
       }
     }
     lines.push(rowTxt);
