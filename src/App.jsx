@@ -73,6 +73,17 @@ export default function AsciiArtApp() {
     return Math.max(1, Math.round((imgMeta.h / imgMeta.w) * (cols / CHAR_ASPECT)));
   }, [imgMeta, cols]);
 
+  const previewMinWidth = useMemo(() => `${Math.max(cols || 0, 1)}ch`, [cols]);
+  const previewTextStyle = useMemo(
+    () => ({
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontSize: `${fontSize}px`,
+      lineHeight: 1,
+      minWidth: previewMinWidth,
+    }),
+    [fontSize, previewMinWidth],
+  );
+
   // Clean up object URLs
   useEffect(() => () => { if (objectUrl) URL.revokeObjectURL(objectUrl); }, [objectUrl]);
 
@@ -234,16 +245,17 @@ export default function AsciiArtApp() {
     }
   }
 
-  function colorizedPreviewHtml(size, html) {
+  function colorizedPreviewHtml(size, html, widthCh) {
     if (!html) return "";
     const family = "ui-monospace, SFMono-Regular, Menlo, monospace";
-    return `<pre style="margin:0; font-family:${family}; font-size:${size}px; line-height:1; white-space:pre;">${html}</pre>`;
+    const widthRule = widthCh ? ` min-width:${widthCh};` : "";
+    return `<pre style="margin:0; font-family:${family}; font-size:${size}px; line-height:1; white-space:pre;${widthRule}">${html}</pre>`;
   }
 
   function copyToClipboard() {
     if (!asciiText) return;
     if (colorize && asciiHtml) {
-      const htmlPayload = colorizedPreviewHtml(fontSize, asciiHtml);
+      const htmlPayload = colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth);
       const blob = new Blob([htmlPayload], { type: "text/html" });
       const item = new ClipboardItem({ "text/html": blob });
       navigator.clipboard.write([item])
@@ -259,7 +271,7 @@ export default function AsciiArtApp() {
 
   function downloadFile() {
     const isHtml = !!colorize;
-    const data = isHtml ? colorizedPreviewHtml(fontSize, asciiHtml) : asciiText;
+    const data = isHtml ? colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth) : asciiText;
     if (!data) return;
     const mime = isHtml ? "text/html" : "text/plain";
     const ext = isHtml ? "html" : "txt";
@@ -360,16 +372,16 @@ export default function AsciiArtApp() {
                   <div>Image: {imgMeta.w}×{imgMeta.h}px</div>
                   <button onClick={clearImage} className="underline">Clear</button>
                 </div>
-                <div className="rounded-2xl overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-black">
-                  <div className="max-h-[60vh] overflow-auto p-3">
+                <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-black">
+                  <div className="max-h-[60vh] overflow-x-auto overflow-y-auto p-3">
                     {colorize ? (
                       <div
-                        style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: `${fontSize}px`, lineHeight: 1 }}
-                        dangerouslySetInnerHTML={{ __html: colorizedPreviewHtml(fontSize, asciiHtml) }}
+                        style={previewTextStyle}
+                        dangerouslySetInnerHTML={{ __html: colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth) }}
                       />
                     ) : (
                       <pre
-                        style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: `${fontSize}px`, lineHeight: 1 }}
+                        style={previewTextStyle}
                         className="whitespace-pre"
                       >{asciiText}</pre>
                     )}
