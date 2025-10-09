@@ -63,6 +63,7 @@ export default function AsciiArtApp() {
 
   const [asciiText, setAsciiText] = useState("");
   const [asciiHtml, setAsciiHtml] = useState("");
+  const [asciiCells, setAsciiCells] = useState([]);
 
   const [urlField, setUrlField] = useState("");
 
@@ -135,6 +136,7 @@ export default function AsciiArtApp() {
   function resetAscii() {
     setAsciiText("");
     setAsciiHtml("");
+    setAsciiCells([]);
   }
 
   function clearImage() {
@@ -237,6 +239,7 @@ export default function AsciiArtApp() {
       });
       setAsciiText(result.text);
       setAsciiHtml(result.html);
+      setAsciiCells(result.cells);
     } catch (e) {
       console.error(e);
       reportError("Conversion failed. Try a different image or smaller width.");
@@ -285,6 +288,73 @@ export default function AsciiArtApp() {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
+  function downloadPng() {
+    if (!asciiCells.length) return;
+    const rowCount = asciiCells.length;
+    const colCount = asciiCells[0]?.length || 0;
+    if (!rowCount || !colCount) return;
+
+    const fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace";
+    const font = `${fontSize}px ${fontFamily}`;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.font = font;
+    const metrics = ctx.measureText("M");
+    const charWidth = metrics.width || fontSize * 0.6;
+    const lineHeight = fontSize;
+
+    canvas.width = Math.ceil(colCount * charWidth);
+    canvas.height = Math.ceil(rowCount * lineHeight);
+
+    ctx.font = font;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+
+    if (!colorize) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#000000";
+    }
+
+    for (let y = 0; y < rowCount; y++) {
+      const row = asciiCells[y];
+      for (let x = 0; x < colCount; x++) {
+        const cell = row?.[x];
+        if (!cell) continue;
+        const posX = x * charWidth;
+        const posY = y * lineHeight;
+
+        if (colorize) {
+          const { r, g, b } = cell;
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          ctx.fillRect(posX, posY, charWidth, lineHeight);
+          const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+          ctx.fillStyle = luminance > 0.6 ? "rgb(0,0,0)" : "rgb(255,255,255)";
+        } else {
+          ctx.fillStyle = "#000000";
+        }
+
+        if (cell.char !== " " || colorize) {
+          ctx.fillText(cell.char, posX, posY);
+        }
+      }
+    }
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = "ascii-art.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    }, "image/png");
+  }
+
   function toast(msg) {
     const el = document.createElement("div");
     el.textContent = msg;
@@ -322,6 +392,7 @@ export default function AsciiArtApp() {
           <div className="flex gap-2">
             <button onClick={copyToClipboard} disabled={!asciiText} className="px-3 py-2 rounded-2xl bg-neutral-900 text-white disabled:opacity-40">Copy</button>
             <button onClick={downloadFile} disabled={!asciiText} className="px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Download</button>
+            <button onClick={downloadPng} disabled={!asciiCells.length} className="px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Download PNG</button>
             <label className="px-3 py-2 rounded-2xl bg-indigo-600 text-white cursor-pointer">
               Upload
               <input
@@ -482,6 +553,7 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   const n = ramp.length;
   const lines = [];
   const htmlLines = [];
+  const cells = new Array(rows);
 
   function bright(r, g, b) {
     let v = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
@@ -548,6 +620,7 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   for (let y = 0; y < rows; y++) {
     let rowTxt = "";
     let rowHtml = "";
+    const rowCells = new Array(targetCols);
     for (let x = 0; x < targetCols; x++) {
       const idx = y * targetCols + x;
       const dataIdx = idx * 4;
@@ -557,6 +630,7 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
       const i = n > 1 ? quantized[idx] : 0;
       const ch = ramp[i];
       rowTxt += ch;
+      rowCells[x] = { char: ch, r, g, b };
       if (colorize) {
         const glyph = ch === " " ? "&nbsp;" : escapeHtml(ch);
         const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
@@ -566,11 +640,12 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
     }
     lines.push(rowTxt);
     if (colorize) htmlLines.push(rowHtml);
+    cells[y] = rowCells;
   }
 
   const text = lines.join("\n");
   const html = colorize ? htmlLines.join("\n") : "";
-  return { text, html };
+  return { text, html, cells };
 }
 
 function loadImage(url) {
