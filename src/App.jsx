@@ -58,6 +58,7 @@ export default function AsciiArtApp() {
   const [invert, setInvert] = useState(DEFAULTS.invert);
   const [gamma, setGamma] = useState(DEFAULTS.gamma);
   const [colorize, setColorize] = useState(DEFAULTS.colorize);
+  const [messengerFriendly, setMessengerFriendly] = useState(false);
   const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
   const [busy, setBusy] = useState(false);
 
@@ -255,8 +256,24 @@ export default function AsciiArtApp() {
     return `<pre style="margin:0; font-family:${family}; font-size:${size}px; line-height:1; white-space:pre;${widthRule}">${html}</pre>`;
   }
 
+  function formatForMessenger(text) {
+    if (!text) return "";
+    const figureSpace = "\u2007";
+    const stabilized = text.replace(/ /g, figureSpace);
+    return "```\n" + stabilized + "\n```";
+  }
+
   function copyToClipboard() {
     if (!asciiText) return;
+    if (messengerFriendly) {
+      const payload = formatForMessenger(asciiText);
+      if (!payload) return;
+      navigator.clipboard
+        .writeText(payload)
+        .then(() => toast("Copied with messenger formatting 📱"))
+        .catch(() => toast("Copy failed"));
+      return;
+    }
     if (colorize && asciiHtml) {
       const htmlPayload = colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth);
       const blob = new Blob([htmlPayload], { type: "text/html" });
@@ -273,8 +290,10 @@ export default function AsciiArtApp() {
   }
 
   function downloadFile() {
-    const isHtml = !!colorize;
-    const data = isHtml ? colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth) : asciiText;
+    if (!asciiText) return;
+    const isHtml = !!colorize && !messengerFriendly;
+    const plainTextData = messengerFriendly ? formatForMessenger(asciiText) : asciiText;
+    const data = isHtml ? colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth) : plainTextData;
     if (!data) return;
     const mime = isHtml ? "text/html" : "text/plain";
     const ext = isHtml ? "html" : "txt";
@@ -495,9 +514,12 @@ export default function AsciiArtApp() {
               <p className="text-xs text-neutral-500 mt-1">Lower = brighter mids, Higher = darker mids</p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} /> Invert brightness</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={colorize} onChange={(e) => setColorize(e.target.checked)} /> Colorize</label>
+              <label className="inline-flex items-center gap-2" title="Formats copies/downloads with figure spaces and triple backticks for WhatsApp/iMessage.">
+                <input type="checkbox" checked={messengerFriendly} onChange={(e) => setMessengerFriendly(e.target.checked)} /> Messenger-friendly (WhatsApp/iMessage)
+              </label>
             </div>
 
             <div>
@@ -522,7 +544,7 @@ export default function AsciiArtApp() {
             </div>
 
             <div className="pt-1 text-xs text-neutral-500 leading-relaxed">
-              <p><strong>Tips:</strong> Paste with ⌘/Ctrl+V. Big widths (200–300) look sharper but render slower. If your iPhone photo is HEIC, export as JPEG/PNG first (screenshot also works).</p>
+              <p><strong>Tips:</strong> Paste with ⌘/Ctrl+V. Big widths (200–300) look sharper but render slower. If your iPhone photo is HEIC, export as JPEG/PNG first (screenshot also works). Enable Messenger-friendly for WhatsApp/iMessage-safe spacing inside a monospace code block.</p>
             </div>
           </div>
         </section>
