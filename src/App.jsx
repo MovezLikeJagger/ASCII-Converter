@@ -346,16 +346,18 @@ export default function AsciiArtApp() {
             className="relative border border-dashed rounded-3xl p-6 sm:p-8 border-neutral-300 dark:border-neutral-700 min-h-[260px] hover:bg-neutral-100/40 dark:hover:bg-neutral-900/40 transition"
           >
             {/* Full-area invisible input overlay for bulletproof tapping/clicking on mobile */}
-            <input
-              ref={overlayInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="absolute inset-0 opacity-0 cursor-pointer"
-              title=""
-              onChange={onFileChange}
-              onClick={(e) => { e.target.value = null; }}
-            />
+            {!imageUrl && (
+              <input
+                ref={overlayInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="absolute inset-0 opacity-0 cursor-pointer"
+                title=""
+                onChange={onFileChange}
+                onClick={(e) => { e.target.value = null; }}
+              />
+            )}
 
             {!imageUrl ? (
               <div className="text-center pointer-events-none">
