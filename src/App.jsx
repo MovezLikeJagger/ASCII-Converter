@@ -351,7 +351,9 @@ export default function AsciiArtApp() {
               type="file"
               accept="image/*"
               capture="environment"
-              className="absolute inset-0 opacity-0 cursor-pointer"
+              className={`absolute inset-0 opacity-0 ${imageUrl ? "pointer-events-none" : "cursor-pointer"}`}
+              tabIndex={imageUrl ? -1 : 0}
+              aria-hidden={imageUrl ? "true" : undefined}
               title=""
               onChange={onFileChange}
               onClick={(e) => { e.target.value = null; }}
