@@ -392,17 +392,17 @@ export default function AsciiArtApp() {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
-  function downloadPng() {
-    if (!asciiCells.length) return;
+  function renderAsciiToCanvas({ textColor, backgroundColor }) {
+    if (!asciiCells.length) return null;
     const rowCount = asciiCells.length;
     const colCount = asciiCells[0]?.length || 0;
-    if (!rowCount || !colCount) return;
+    if (!rowCount || !colCount) return null;
 
     const fontFamily = MONO_FONT_STACK;
     const font = `${fontSize}px ${fontFamily}`;
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return null;
 
     ctx.font = font;
     const metrics = ctx.measureText("M");
@@ -417,9 +417,12 @@ export default function AsciiArtApp() {
     ctx.textAlign = "left";
 
     if (!colorize) {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = backgroundColor;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = textColor;
+    } else if (backgroundColor) {
+      ctx.fillStyle = backgroundColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
     for (let y = 0; y < rowCount; y++) {
@@ -437,7 +440,7 @@ export default function AsciiArtApp() {
           const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
           ctx.fillStyle = luminance > 0.6 ? "rgb(0,0,0)" : "rgb(255,255,255)";
         } else {
-          ctx.fillStyle = "#000000";
+          ctx.fillStyle = textColor;
         }
 
         if (cell.char !== " " || colorize) {
@@ -446,12 +449,36 @@ export default function AsciiArtApp() {
       }
     }
 
+    return canvas;
+  }
+
+  function downloadPng() {
+    const canvas = renderAsciiToCanvas({ textColor: "#000000", backgroundColor: "#ffffff" });
+    if (!canvas) return;
+
     canvas.toBlob((blob) => {
       if (!blob) return;
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
       link.download = "ascii-art.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    }, "image/png");
+  }
+
+  function downloadOledPng() {
+    const canvas = renderAsciiToCanvas({ textColor: "#ffffff", backgroundColor: "#000000" });
+    if (!canvas) return;
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = "ascii-art-oled.png";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -645,6 +672,13 @@ export default function AsciiArtApp() {
               className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
             >
               Download PNG
+            </button>
+            <button
+              onClick={downloadOledPng}
+              disabled={!asciiCells.length}
+              className={`px-3 py-2 rounded-2xl bg-neutral-900 text-white ${actionButtonSizing}`}
+            >
+              Download OLED PNG
             </button>
             <label
               className={`px-3 py-2 rounded-2xl bg-indigo-600 text-white cursor-pointer ${actionButtonSizing}`}
