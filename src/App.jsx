@@ -60,6 +60,7 @@ const EMPTY_FLOAT32 = new Float32Array(0);
 
 // Cache decoded images so repeated conversions (changing sliders) don't trigger re-decode.
 const imageCache = new Map();
+const personDetectionCache = new Map();
 
 // Mime types that decode reliably across browsers/canvases in this preview
 const SUPPORTED_TYPES = new Set([
@@ -87,6 +88,7 @@ export default function AsciiArtApp() {
   const [colorize, setColorize] = useState(DEFAULTS.colorize);
   const [messengerFriendly, setMessengerFriendly] = useState(false);
   const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
+  const [personDetectionEnabled, setPersonDetectionEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const [asciiText, setAsciiText] = useState("");
@@ -215,7 +217,7 @@ export default function AsciiArtApp() {
     const id = setTimeout(() => convertToAscii(imageUrl, imgMeta.w, imgMeta.h), 60);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cols, charset, invert, gamma, colorize]);
+  }, [cols, charset, invert, gamma, colorize, personDetectionEnabled]);
 
   function resetAscii() {
     setAsciiText("");
@@ -322,6 +324,7 @@ export default function AsciiArtApp() {
         invert,
         gamma,
         colorize,
+        isolatePeople: personDetectionEnabled,
       });
       setAsciiText(result.text);
       setAsciiHtml(result.html);
@@ -578,6 +581,10 @@ export default function AsciiArtApp() {
         />
       </div>
 
+      <p className="text-xs text-neutral-500">
+        When person isolation is on, the app uses on-device machine learning to locate people and only renders those areas in ASCII.
+      </p>
+
       <div>
         <label className="block mb-1 text-sm">Character set</label>
         <select
@@ -620,6 +627,14 @@ export default function AsciiArtApp() {
         </label>
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" checked={colorize} onChange={(e) => setColorize(e.target.checked)} /> Colorize
+        </label>
+        <label className="inline-flex items-center gap-2" title="Detects people and removes everything else from the ASCII render.">
+          <input
+            type="checkbox"
+            checked={personDetectionEnabled}
+            onChange={(e) => setPersonDetectionEnabled(e.target.checked)}
+          />
+          Isolate detected people
         </label>
         <label
           className="inline-flex items-center gap-2"
@@ -859,7 +874,7 @@ export default function AsciiArtApp() {
   );
 }
 
-async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, gamma, colorize }) {
+async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, gamma, colorize, isolatePeople }) {
   // Compute target rows using aspect compensation
   const rows = Math.max(1, Math.round((imgH / imgW) * (targetCols / CHAR_ASPECT)));
 
@@ -867,9 +882,46 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const img = await loadImageCached(url);
+
+  let asciiPersonMask = null;
+  if (isolatePeople) {
+    try {
+      const mask = await getCachedPersonMask(url, img);
+      if (mask?.data && mask.width && mask.height) {
+        asciiPersonMask = downsampleMaskToAscii(mask, targetCols, rows);
+        if (asciiPersonMask) {
+          asciiPersonMask = smoothBinaryMask(asciiPersonMask, targetCols, rows);
+        }
+      }
+    } catch (err) {
+      console.warn("Person isolation failed; rendering full image instead.", err);
+    }
+  }
+
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  let maskedPixels = null;
+  const shouldIsolate = asciiPersonMask instanceof Uint8Array;
+  if (shouldIsolate) {
+    maskedPixels = new Uint8Array(rows * targetCols);
+    const fillValue = invert ? 0 : 255;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < targetCols; x++) {
+        const idx = y * targetCols + x;
+        const inside = asciiPersonMask[idx] === 1;
+        if (!inside) {
+          const dataIdx = idx * 4;
+          maskedPixels[idx] = 1;
+          data[dataIdx + 0] = fillValue;
+          data[dataIdx + 1] = fillValue;
+          data[dataIdx + 2] = fillValue;
+          data[dataIdx + 3] = 255;
+        }
+      }
+    }
+  }
 
   const ramp = charset?.ramp || "";
   const levels = charset?.levels || EMPTY_FLOAT32;
@@ -953,8 +1005,9 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
       const r = data[dataIdx + 0];
       const g = data[dataIdx + 1];
       const b = data[dataIdx + 2];
+      const masked = maskedPixels && maskedPixels[idx] === 1;
       const i = n > 1 ? quantized[idx] : 0;
-      const ch = ramp[i];
+      const ch = masked ? " " : ramp[i];
       rowTxt += ch;
       rowCells[x] = { char: ch, r, g, b };
       if (colorize) {
@@ -1050,6 +1103,7 @@ async function loadImageMeta(url) {
 function releaseCachedImage(url) {
   if (!url) return;
   imageCache.delete(url);
+  personDetectionCache.delete(url);
 }
 
 function escapeHtml(str) {
@@ -1168,4 +1222,201 @@ function quantizeToLevels(value, levels) {
     return { index: lo, value: lowVal };
   }
   return { index: hi, value: highVal };
+}
+
+const PERSON_SEGMENTATION_THRESHOLD = 0.65;
+let personSegmenterPromise = null;
+
+async function getCachedPersonMask(url, img) {
+  if (!url || !img) return null;
+  if (personDetectionCache.has(url)) {
+    return personDetectionCache.get(url);
+  }
+  const detectionPromise = segmentPeopleInImage(img)
+    .then((mask) => {
+      const resolved = mask && mask.data ? mask : null;
+      personDetectionCache.set(url, Promise.resolve(resolved));
+      return resolved;
+    })
+    .catch((err) => {
+      personDetectionCache.delete(url);
+      throw err;
+    });
+  personDetectionCache.set(url, detectionPromise);
+  return detectionPromise;
+}
+
+async function loadPersonSegmenter() {
+  if (personSegmenterPromise) {
+    return personSegmenterPromise;
+  }
+  personSegmenterPromise = Promise.all([import("@tensorflow/tfjs"), import("@tensorflow-models/body-pix")])
+    .then(async ([tf, bodyPix]) => {
+      try {
+        await tf.ready();
+        if (tf.backend() !== "webgl") {
+          await tf.setBackend("webgl");
+          await tf.ready();
+        }
+      } catch (err) {
+        console.warn("Falling back to default TensorFlow.js backend", err);
+      }
+      return bodyPix.load({
+        architecture: "MobileNetV1",
+        outputStride: 16,
+        multiplier: 0.75,
+        quantBytes: 2,
+      });
+    })
+    .catch((err) => {
+      personSegmenterPromise = null;
+      throw err;
+    });
+  return personSegmenterPromise;
+}
+
+async function segmentPeopleInImage(img) {
+  if (typeof window === "undefined" || !img) {
+    return null;
+  }
+  try {
+    const segmenter = await loadPersonSegmenter();
+    const people = await segmenter.segmentMultiPerson(img, {
+      internalResolution: "medium",
+      segmentationThreshold: PERSON_SEGMENTATION_THRESHOLD,
+      maxDetections: 6,
+      scoreThreshold: 0.3,
+    });
+    if (!Array.isArray(people) || people.length === 0) {
+      return null;
+    }
+    const { width, height } = people[0];
+    if (!width || !height) {
+      return null;
+    }
+    const combined = new Uint8Array(width * height);
+    for (const person of people) {
+      if (!person?.data || person.width !== width || person.height !== height) continue;
+      const src = person.data;
+      const limit = Math.min(src.length, combined.length);
+      for (let i = 0; i < limit; i++) {
+        if (src[i]) combined[i] = 1;
+      }
+    }
+    let activePixels = 0;
+    for (let i = 0; i < combined.length; i++) {
+      if (combined[i]) activePixels++;
+      if (activePixels > 0) break;
+    }
+    if (activePixels === 0) {
+      return null;
+    }
+    return { data: combined, width, height };
+  } catch (err) {
+    console.error("Person segmentation error", err);
+    return null;
+  }
+}
+
+function downsampleMaskToAscii(mask, cols, rows, coverageThreshold = 0.25) {
+  if (!mask?.data || !cols || !rows) {
+    return null;
+  }
+  const { data, width, height } = mask;
+  const asciiMask = new Uint8Array(cols * rows);
+  for (let y = 0; y < rows; y++) {
+    const yStart = Math.floor((y / rows) * height);
+    const yEnd = Math.min(height, Math.ceil(((y + 1) / rows) * height));
+    for (let x = 0; x < cols; x++) {
+      const xStart = Math.floor((x / cols) * width);
+      const xEnd = Math.min(width, Math.ceil(((x + 1) / cols) * width));
+      let covered = 0;
+      let total = 0;
+      for (let sy = yStart; sy < yEnd; sy++) {
+        const rowOffset = sy * width;
+        for (let sx = xStart; sx < xEnd; sx++) {
+          total++;
+          if (data[rowOffset + sx]) {
+            covered++;
+          }
+        }
+      }
+      const idx = y * cols + x;
+      if (total > 0 && covered / total >= coverageThreshold) {
+        asciiMask[idx] = 1;
+      }
+    }
+  }
+  return asciiMask;
+}
+
+function smoothBinaryMask(mask, width, height) {
+  if (!(mask instanceof Uint8Array)) {
+    return mask ?? null;
+  }
+  if (!width || !height) {
+    return mask;
+  }
+  const dilated = dilateMask(mask, width, height, 1);
+  if (!(dilated instanceof Uint8Array)) {
+    return mask;
+  }
+  const eroded = erodeMask(dilated, width, height, 1);
+  return eroded instanceof Uint8Array ? eroded : mask;
+}
+
+function dilateMask(src, width, height, radius) {
+  if (!(src instanceof Uint8Array) || !width || !height) {
+    return null;
+  }
+  const dst = new Uint8Array(src.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (!src[idx]) continue;
+      const yMin = Math.max(0, y - radius);
+      const yMax = Math.min(height - 1, y + radius);
+      const xMin = Math.max(0, x - radius);
+      const xMax = Math.min(width - 1, x + radius);
+      for (let ny = yMin; ny <= yMax; ny++) {
+        const rowOffset = ny * width;
+        for (let nx = xMin; nx <= xMax; nx++) {
+          dst[rowOffset + nx] = 1;
+        }
+      }
+    }
+  }
+  return dst;
+}
+
+function erodeMask(src, width, height, radius) {
+  if (!(src instanceof Uint8Array) || !width || !height) {
+    return null;
+  }
+  const dst = new Uint8Array(src.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (!src[idx]) {
+        dst[idx] = 0;
+        continue;
+      }
+      let keep = true;
+      const yMin = Math.max(0, y - radius);
+      const yMax = Math.min(height - 1, y + radius);
+      const xMin = Math.max(0, x - radius);
+      const xMax = Math.min(width - 1, x + radius);
+      for (let ny = yMin; ny <= yMax && keep; ny++) {
+        const rowOffset = ny * width;
+        for (let nx = xMin; nx <= xMax; nx++) {
+          if (!src[rowOffset + nx]) {
+            keep = false;
+            break;
+          }
+        }
+      }
+      dst[idx] = keep ? 1 : 0;
+    }
+  }
+  return dst;
 }
