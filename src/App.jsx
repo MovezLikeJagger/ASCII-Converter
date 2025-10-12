@@ -71,8 +71,6 @@ const SUPPORTED_TYPES = new Set([
 ]);
 
 export default function AsciiArtApp() {
-  const fileInputRef = useRef(null);
-  const overlayInputRef = useRef(null);
   const dropRef = useRef(null);
 
   const [imageUrl, setImageUrl] = useState("");
@@ -745,7 +743,6 @@ export default function AsciiArtApp() {
             >
               Upload
               <input
-                ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
@@ -776,7 +773,6 @@ export default function AsciiArtApp() {
             {/* Full-area invisible input overlay for bulletproof tapping/clicking on mobile */}
             {!imageUrl && (
               <input
-                ref={overlayInputRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
