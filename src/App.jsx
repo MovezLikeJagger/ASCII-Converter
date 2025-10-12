@@ -22,6 +22,10 @@ const CHARSETS = [
   { name: "Sharp", set: " `-~+*^=/#$@" },
 ];
 
+const MONO_FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, monospace";
+const CALIBRATION_FONT_SIZE = 64;
+const GLYPH_CANVAS_SIZE = 96;
+
 const DEFAULTS = {
   cols: 120,
   charsetIndex: 0,
@@ -45,6 +49,14 @@ const scratchCanvas = {
   canvas: null,
   ctx: null,
 };
+
+const glyphScratch = {
+  canvas: null,
+  ctx: null,
+};
+
+const charsetCalibrationCache = new Map();
+const EMPTY_FLOAT32 = new Float32Array(0);
 
 // Cache decoded images so repeated conversions (changing sliders) don't trigger re-decode.
 const imageCache = new Map();
@@ -83,7 +95,11 @@ export default function AsciiArtApp() {
 
   const [urlField, setUrlField] = useState("");
 
-  const charset = useMemo(() => CHARSETS[charsetIndex].set, [charsetIndex]);
+  const charsetInfo = useMemo(
+    () => getCalibratedCharset(CHARSETS[charsetIndex].set),
+    [charsetIndex],
+  );
+  const charset = charsetInfo.ramp;
 
   const rows = useMemo(() => {
     if (!imgMeta.w || !imgMeta.h || !cols) return 0;
@@ -93,7 +109,7 @@ export default function AsciiArtApp() {
   const previewMinWidth = useMemo(() => `${Math.max(cols || 0, 1)}ch`, [cols]);
   const previewTextStyle = useMemo(
     () => ({
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontFamily: MONO_FONT_STACK,
       fontSize: `${fontSize}px`,
       lineHeight: 1,
       minWidth: previewMinWidth,
@@ -262,7 +278,7 @@ export default function AsciiArtApp() {
         targetCols: cols,
         imgW: w,
         imgH: h,
-        charset,
+        charset: charsetInfo,
         invert,
         gamma,
         colorize,
@@ -280,7 +296,7 @@ export default function AsciiArtApp() {
 
   function colorizedPreviewHtml(size, html, widthCh) {
     if (!html) return "";
-    const family = "ui-monospace, SFMono-Regular, Menlo, monospace";
+    const family = MONO_FONT_STACK;
     const widthRule = widthCh ? ` min-width:${widthCh};` : "";
     return `<pre style="margin:0; font-family:${family}; font-size:${size}px; line-height:1; white-space:pre;${widthRule}">${html}</pre>`;
   }
@@ -342,7 +358,7 @@ export default function AsciiArtApp() {
     const colCount = asciiCells[0]?.length || 0;
     if (!rowCount || !colCount) return;
 
-    const fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace";
+    const fontFamily = MONO_FONT_STACK;
     const font = `${fontSize}px ${fontFamily}`;
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -536,6 +552,7 @@ export default function AsciiArtApp() {
                 ))}
               </select>
               <div className="mt-1 text-xs text-neutral-500 truncate">{charset}</div>
+              <p className="mt-1 text-xs text-neutral-500 leading-relaxed">Characters are automatically reordered by measured glyph brightness so shading matches the source image more closely.</p>
             </div>
 
             <div>
@@ -599,7 +616,12 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
 
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  const ramp = charset;
+  const ramp = charset?.ramp || "";
+  const levels = charset?.levels || EMPTY_FLOAT32;
+  const hasRamp = ramp.length > 0;
+  if (!hasRamp) {
+    return { text: "", html: "", cells: [] };
+  }
   const n = ramp.length;
   const lines = [];
   const htmlLines = [];
@@ -631,17 +653,16 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   if (n <= 1) {
     // No ramp variance: all pixels map to the single available glyph.
     quantized.fill(0);
-    brightness.fill(0);
+    const fillValue = levels[0] ?? 0;
+    brightness.fill(fillValue);
   } else {
-    const maxIndex = n - 1;
     const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < targetCols; x++) {
         const idx = y * targetCols + x;
         const oldPixel = brightness[idx];
-        const qIdx = Math.round(oldPixel * maxIndex);
-        const newPixel = qIdx / maxIndex;
+        const { index: qIdx, value: newPixel } = quantizeToLevels(oldPixel, levels);
         const error = oldPixel - newPixel;
 
         brightness[idx] = newPixel;
@@ -724,6 +745,28 @@ function getScratchContext(width, height) {
   return scratchCanvas;
 }
 
+function getGlyphContext() {
+  if (!glyphScratch.canvas) {
+    glyphScratch.canvas = document.createElement("canvas");
+    glyphScratch.canvas.width = GLYPH_CANVAS_SIZE;
+    glyphScratch.canvas.height = GLYPH_CANVAS_SIZE;
+    glyphScratch.ctx = glyphScratch.canvas.getContext("2d", { willReadFrequently: true });
+  }
+  if (!glyphScratch.ctx) {
+    throw new Error("Canvas context unavailable");
+  }
+  if (glyphScratch.canvas.width !== GLYPH_CANVAS_SIZE || glyphScratch.canvas.height !== GLYPH_CANVAS_SIZE) {
+    glyphScratch.canvas.width = GLYPH_CANVAS_SIZE;
+    glyphScratch.canvas.height = GLYPH_CANVAS_SIZE;
+  }
+  const { ctx } = glyphScratch;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${CALIBRATION_FONT_SIZE}px ${MONO_FONT_STACK}`;
+  return glyphScratch;
+}
+
 function loadImageCached(url) {
   if (!url) return Promise.reject(new Error("Missing image URL"));
   if (imageCache.has(url)) {
@@ -761,4 +804,113 @@ function escapeHtml(str) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function getCalibratedCharset(chars) {
+  const safeChars = typeof chars === "string" ? chars : String(chars ?? "");
+  if (!safeChars) {
+    return { ramp: "", levels: EMPTY_FLOAT32, raw: "" };
+  }
+  if (charsetCalibrationCache.has(safeChars)) {
+    return charsetCalibrationCache.get(safeChars);
+  }
+  const calibration = typeof document === "undefined" ? createUniformCharset(safeChars) : calibrateCharset(safeChars);
+  charsetCalibrationCache.set(safeChars, calibration);
+  return calibration;
+}
+
+function createUniformCharset(chars) {
+  const ramp = chars;
+  if (!ramp.length) {
+    return { ramp: "", levels: EMPTY_FLOAT32, raw: chars };
+  }
+  const levels = new Float32Array(ramp.length);
+  if (ramp.length === 1) {
+    levels[0] = 0;
+  } else {
+    const denom = ramp.length - 1;
+    for (let i = 0; i < ramp.length; i++) {
+      levels[i] = i / denom;
+    }
+  }
+  return { ramp, levels, raw: chars };
+}
+
+function calibrateCharset(chars) {
+  const uniqueChars = Array.from(new Set([...chars]));
+  if (!uniqueChars.length) {
+    return createUniformCharset(chars);
+  }
+  const { canvas, ctx } = getGlyphContext();
+  const entries = [];
+  for (const ch of uniqueChars) {
+    const brightness = measureCharBrightness(ctx, ch, canvas.width, canvas.height);
+    entries.push({ ch, brightness });
+  }
+  entries.sort((a, b) => a.brightness - b.brightness);
+  if (!entries.length) {
+    return createUniformCharset(chars);
+  }
+  const ramp = entries.map((entry) => entry.ch).join("");
+  const min = entries[0].brightness;
+  const max = entries[entries.length - 1].brightness;
+  const range = Math.max(1e-6, max - min);
+  const levels = new Float32Array(entries.length);
+  for (let i = 0; i < entries.length; i++) {
+    const normalized = range === 0 ? 0 : (entries[i].brightness - min) / range;
+    levels[i] = normalized;
+  }
+  return { ramp, levels, raw: chars };
+}
+
+function measureCharBrightness(ctx, ch, width, height) {
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  if (ch !== " ") {
+    ctx.fillStyle = "#000000";
+    ctx.fillText(ch, width / 2, height / 2);
+  }
+  const { data } = ctx.getImageData(0, 0, width, height);
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    sum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  const pixels = (data.length / 4) || 1;
+  return sum / (pixels * 255);
+}
+
+function quantizeToLevels(value, levels) {
+  const n = levels.length;
+  if (n === 0) {
+    return { index: 0, value: 0 };
+  }
+  if (n === 1) {
+    return { index: 0, value: levels[0] };
+  }
+  if (value <= levels[0]) {
+    return { index: 0, value: levels[0] };
+  }
+  const lastIndex = n - 1;
+  if (value >= levels[lastIndex]) {
+    return { index: lastIndex, value: levels[lastIndex] };
+  }
+  let lo = 0;
+  let hi = lastIndex;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (value >= levels[mid]) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  const lowVal = levels[lo];
+  const highVal = levels[hi];
+  if (value - lowVal <= highVal - value) {
+    return { index: lo, value: lowVal };
+  }
+  return { index: hi, value: highVal };
 }
