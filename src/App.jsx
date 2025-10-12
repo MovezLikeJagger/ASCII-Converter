@@ -484,14 +484,11 @@ export default function AsciiArtApp() {
         if (colorize) {
           const { r, g, b } = cell;
           ctx.fillStyle = `rgb(${r},${g},${b})`;
-          ctx.fillRect(posX, posY, charWidth, lineHeight);
-          const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-          ctx.fillStyle = luminance > 0.6 ? "rgb(0,0,0)" : "rgb(255,255,255)";
         } else {
           ctx.fillStyle = textColor;
         }
 
-        if (cell.char !== " " || colorize) {
+        if (cell.char !== " ") {
           ctx.fillText(cell.char, posX, posY);
         }
       }
@@ -964,9 +961,7 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
       rowCells[x] = { char: ch, r, g, b };
       if (colorize) {
         const glyph = ch === " " ? "&nbsp;" : escapeHtml(ch);
-        const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-        const textRgb = luminance > 0.6 ? "rgb(0,0,0)" : "rgb(255,255,255)";
-        rowHtml += `<span style="display:inline-block;width:1ch;height:1em;background-color: rgb(${r},${g},${b});color:${textRgb};font-family:inherit;">${glyph}</span>`;
+        rowHtml += `<span style="display:inline-block;width:1ch;height:1em;color: rgb(${r},${g},${b});font-family:inherit;">${glyph}</span>`;
       }
     }
     lines.push(rowTxt);
