@@ -94,6 +94,9 @@ export default function AsciiArtApp() {
   const [asciiCells, setAsciiCells] = useState([]);
 
   const [urlField, setUrlField] = useState("");
+  const [isIphone, setIsIphone] = useState(false);
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
 
   const charsetInfo = useMemo(
     () => getCalibratedCharset(CHARSETS[charsetIndex].set),
@@ -116,6 +119,8 @@ export default function AsciiArtApp() {
     }),
     [fontSize, previewMinWidth],
   );
+
+  const isMobileLayout = isIphone || isCompactViewport;
 
   // Clean up object URLs
   useEffect(
@@ -165,6 +170,45 @@ export default function AsciiArtApp() {
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const ua = navigator.userAgent || navigator.vendor || "";
+    const isIphoneUA = /iPhone/.test(ua);
+    const isTouchMac =
+      /Mac/.test(ua) && typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 2;
+    if (isIphoneUA) {
+      setIsIphone(true);
+      return;
+    }
+    if (typeof window !== "undefined" && isTouchMac) {
+      const mq = window.matchMedia("(max-width: 820px)");
+      setIsIphone(mq.matches);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handleChange = (event) => setIsCompactViewport(event.matches);
+    setIsCompactViewport(mq.matches);
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", handleChange);
+      return () => mq.removeEventListener("change", handleChange);
+    }
+    mq.addListener(handleChange);
+    return () => mq.removeListener(handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileLayout) {
+      setMobileSettingsOpen(false);
+      return;
+    }
+    if (imageUrl) {
+      setMobileSettingsOpen(true);
+    }
+  }, [isMobileLayout, imageUrl]);
+
   // Re-render ASCII when settings change and an image is loaded
   useEffect(() => {
     if (!imageUrl || !imgMeta.w || !imgMeta.h) return;
@@ -194,10 +238,6 @@ export default function AsciiArtApp() {
   function reportError(msg) {
     setError(msg);
     setTimeout(() => setError(""), 5000);
-  }
-
-  function handlePick() {
-    fileInputRef.current?.click();
   }
 
   function onFileChange(e) {
@@ -449,16 +489,166 @@ export default function AsciiArtApp() {
     });
   }
 
+  const actionButtonSizing = isMobileLayout ? "flex-1 min-w-[140px]" : "";
+  const settingsForm = (
+    <>
+      <div>
+        <label className="flex justify-between items-center mb-1 text-sm">
+          <span>Width (columns)</span>
+          <span className="tabular-nums text-neutral-500">{cols}</span>
+        </label>
+        <input
+          type="range"
+          min={40}
+          max={300}
+          value={cols}
+          onChange={(e) => setCols(parseInt(e.target.value))}
+          className="w-full"
+        />
+      </div>
+
+      <div>
+        <label className="block mb-1 text-sm">Character set</label>
+        <select
+          value={charsetIndex}
+          onChange={(e) => setCharsetIndex(parseInt(e.target.value))}
+          className="w-full rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent p-2"
+        >
+          {CHARSETS.map((c, i) => (
+            <option key={c.name} value={i}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <div className="mt-1 text-xs text-neutral-500 truncate">{charset}</div>
+        <p className="mt-1 text-xs text-neutral-500 leading-relaxed">
+          Characters are automatically reordered by measured glyph brightness so shading matches the source image more closely.
+        </p>
+      </div>
+
+      <div>
+        <label className="flex justify-between items-center mb-1 text-sm">
+          <span>Gamma</span>
+          <span className="tabular-nums text-neutral-500">{gamma.toFixed(2)}</span>
+        </label>
+        <input
+          type="range"
+          min={0.4}
+          max={2.2}
+          step={0.01}
+          value={gamma}
+          onChange={(e) => setGamma(parseFloat(e.target.value))}
+          className="w-full"
+        />
+        <p className="text-xs text-neutral-500 mt-1">Lower = brighter mids, Higher = darker mids</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} /> Invert brightness
+        </label>
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={colorize} onChange={(e) => setColorize(e.target.checked)} /> Colorize
+        </label>
+        <label
+          className="inline-flex items-center gap-2"
+          title="Formats copies/downloads with figure spaces and triple backticks for WhatsApp/iMessage."
+        >
+          <input
+            type="checkbox"
+            checked={messengerFriendly}
+            onChange={(e) => setMessengerFriendly(e.target.checked)}
+          />
+          Messenger-friendly (WhatsApp/iMessage)
+        </label>
+      </div>
+
+      <div>
+        <label className="flex justify-between items-center mb-1 text-sm">
+          <span>Font size</span>
+          <span className="tabular-nums text-neutral-500">{fontSize}px</span>
+        </label>
+        <input
+          type="range"
+          min={8}
+          max={32}
+          value={fontSize}
+          onChange={(e) => setFontSize(parseInt(e.target.value))}
+          className="w-full"
+        />
+      </div>
+
+      <div className="pt-2">
+        <label className="block mb-1 text-sm">Import by direct image URL</label>
+        <div className="flex gap-2">
+          <input
+            type="url"
+            placeholder="https://example.com/picture.jpg"
+            value={urlField}
+            onChange={(e) => setUrlField(e.target.value)}
+            className="flex-1 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent p-2"
+          />
+          <button
+            onClick={() => importFromUrl()}
+            className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${isMobileLayout ? "min-w-[96px]" : ""}`}
+          >
+            Load
+          </button>
+        </div>
+        <p className="text-xs text-neutral-500 mt-1">We download as a blob to keep the canvas untainted.</p>
+      </div>
+
+      <div className="pt-1 text-xs text-neutral-500 leading-relaxed">
+        <p>
+          <strong>Tips:</strong>{" "}
+          {isMobileLayout ? "Tap Upload to open your camera or photo library. " : "Paste with ⌘/Ctrl+V. "}
+          Big widths (200–300) look sharper but render slower. If your iPhone photo is HEIC, export as JPEG/PNG first
+          (screenshot also works). Enable Messenger-friendly for WhatsApp/iMessage-safe spacing inside a monospace code block.
+        </p>
+      </div>
+    </>
+  );
+
   return (
     <div className="min-h-screen w-full bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
       <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40 border-b border-neutral-200/60 dark:border-neutral-800/60">
-        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
-          <h1 className="text-xl sm:text-2xl font-semibold">ASCII Art Image App</h1>
-          <div className="flex gap-2">
-            <button onClick={copyToClipboard} disabled={!asciiText} className="px-3 py-2 rounded-2xl bg-neutral-900 text-white disabled:opacity-40">Copy</button>
-            <button onClick={downloadFile} disabled={!asciiText} className="px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Download</button>
-            <button onClick={downloadPng} disabled={!asciiCells.length} className="px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Download PNG</button>
-            <label className="px-3 py-2 rounded-2xl bg-indigo-600 text-white cursor-pointer">
+        <div
+          className={`mx-auto max-w-6xl px-4 py-3 flex ${
+            isMobileLayout ? "flex-col gap-3" : "items-center justify-between"
+          } sm:flex-row sm:items-center sm:justify-between`}
+        >
+          <h1 className={`text-xl sm:text-2xl font-semibold ${isMobileLayout ? "sm:flex-1" : ""}`}>
+            ASCII Art Image App
+          </h1>
+          <div
+            className={`flex gap-2 ${
+              isMobileLayout ? "flex-wrap w-full justify-start sm:justify-end" : ""
+            }`}
+          >
+            <button
+              onClick={copyToClipboard}
+              disabled={!asciiText}
+              className={`px-3 py-2 rounded-2xl bg-neutral-900 text-white disabled:opacity-40 ${actionButtonSizing}`}
+            >
+              Copy
+            </button>
+            <button
+              onClick={downloadFile}
+              disabled={!asciiText}
+              className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
+            >
+              Download
+            </button>
+            <button
+              onClick={downloadPng}
+              disabled={!asciiCells.length}
+              className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
+            >
+              Download PNG
+            </button>
+            <label
+              className={`px-3 py-2 rounded-2xl bg-indigo-600 text-white cursor-pointer ${actionButtonSizing}`}
+            >
               Upload
               <input
                 ref={fileInputRef}
@@ -467,19 +657,27 @@ export default function AsciiArtApp() {
                 capture="environment"
                 className="sr-only"
                 onChange={onFileChange}
-                onClick={(e) => { e.target.value = null; }}
+                onClick={(e) => {
+                  e.target.value = null;
+                }}
               />
             </label>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <main
+        className={`mx-auto max-w-6xl px-4 py-6 ${
+          isMobileLayout ? "flex flex-col gap-6" : "grid grid-cols-1 lg:grid-cols-5 gap-6"
+        }`}
+      >
         {/* Dropzone / Preview */}
-        <section className="lg:col-span-3">
+        <section className={isMobileLayout ? "w-full" : "lg:col-span-3"}>
           <div
             ref={dropRef}
-            className="relative border border-dashed rounded-3xl p-6 sm:p-8 border-neutral-300 dark:border-neutral-700 min-h-[260px] hover:bg-neutral-100/40 dark:hover:bg-neutral-900/40 transition"
+            className={`relative border border-dashed rounded-3xl border-neutral-300 dark:border-neutral-700 transition hover:bg-neutral-100/40 dark:hover:bg-neutral-900/40 ${
+              isMobileLayout ? "p-5 min-h-[220px]" : "p-6 sm:p-8 min-h-[260px]"
+            }`}
           >
             {/* Full-area invisible input overlay for bulletproof tapping/clicking on mobile */}
             {!imageUrl && (
@@ -498,8 +696,16 @@ export default function AsciiArtApp() {
             {!imageUrl ? (
               <div className="text-center pointer-events-none">
                 <div className="text-5xl mb-2">🖼️➡️🔠</div>
-                <p className="text-base">Drop, paste, click, or tap anywhere to choose an image</p>
-                <p className="text-sm text-neutral-500 mt-2">PNG / JPG / WEBP / GIF / BMP • Paste with ⌘/Ctrl+V • Or use an image URL below</p>
+                <p className="text-base">
+                  {isMobileLayout
+                    ? "Tap Upload above or anywhere in this box to choose or snap a photo"
+                    : "Drop, paste, click, or tap anywhere to choose an image"}
+                </p>
+                <p className="text-sm text-neutral-500 mt-2">
+                  {isMobileLayout
+                    ? "PNG / JPG / WEBP / GIF / BMP • Works great with the iPhone camera • Or paste an image link below"
+                    : "PNG / JPG / WEBP / GIF / BMP • Paste with ⌘/Ctrl+V • Or use an image URL below"}
+                </p>
                 <div className="mt-3">
                   <button onClick={loadDemo} className="pointer-events-auto px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Try a demo</button>
                 </div>
@@ -535,66 +741,30 @@ export default function AsciiArtApp() {
         </section>
 
         {/* Controls */}
-        <section className="lg:col-span-2">
-          <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 sm:p-6 bg-white dark:bg-neutral-950 shadow-sm space-y-5">
-            <h2 className="text-lg font-semibold">Settings</h2>
-
-            <div>
-              <label className="flex justify-between items-center mb-1 text-sm"><span>Width (columns)</span><span className="tabular-nums text-neutral-500">{cols}</span></label>
-              <input type="range" min={40} max={300} value={cols} onChange={(e) => setCols(parseInt(e.target.value))} className="w-full" />
-            </div>
-
-            <div>
-              <label className="block mb-1 text-sm">Character set</label>
-              <select value={charsetIndex} onChange={(e) => setCharsetIndex(parseInt(e.target.value))} className="w-full rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent p-2">
-                {CHARSETS.map((c, i) => (
-                  <option key={c.name} value={i}>{c.name}</option>
-                ))}
-              </select>
-              <div className="mt-1 text-xs text-neutral-500 truncate">{charset}</div>
-              <p className="mt-1 text-xs text-neutral-500 leading-relaxed">Characters are automatically reordered by measured glyph brightness so shading matches the source image more closely.</p>
-            </div>
-
-            <div>
-              <label className="flex justify-between items-center mb-1 text-sm"><span>Gamma</span><span className="tabular-nums text-neutral-500">{gamma.toFixed(2)}</span></label>
-              <input type="range" min={0.4} max={2.2} step={0.01} value={gamma} onChange={(e) => setGamma(parseFloat(e.target.value))} className="w-full" />
-              <p className="text-xs text-neutral-500 mt-1">Lower = brighter mids, Higher = darker mids</p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} /> Invert brightness</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={colorize} onChange={(e) => setColorize(e.target.checked)} /> Colorize</label>
-              <label className="inline-flex items-center gap-2" title="Formats copies/downloads with figure spaces and triple backticks for WhatsApp/iMessage.">
-                <input type="checkbox" checked={messengerFriendly} onChange={(e) => setMessengerFriendly(e.target.checked)} /> Messenger-friendly (WhatsApp/iMessage)
-              </label>
-            </div>
-
-            <div>
-              <label className="flex justify-between items-center mb-1 text-sm"><span>Font size</span><span className="tabular-nums text-neutral-500">{fontSize}px</span></label>
-              <input type="range" min={8} max={32} value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value))} className="w-full" />
-            </div>
-
-            {/* URL Import */}
-            <div className="pt-2">
-              <label className="block mb-1 text-sm">Import by direct image URL</label>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  placeholder="https://example.com/picture.jpg"
-                  value={urlField}
-                  onChange={(e) => setUrlField(e.target.value)}
-                  className="flex-1 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent p-2"
-                />
-                <button onClick={() => importFromUrl()} className="px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Load</button>
+        {isMobileLayout ? (
+          <section className="lg:col-span-2">
+            <details
+              className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 shadow-sm"
+              open={mobileSettingsOpen}
+              onToggle={(event) => setMobileSettingsOpen(event.target.open)}
+            >
+              <summary className="flex items-center justify-between gap-2 px-4 py-3 text-base font-semibold cursor-pointer select-none [&::-webkit-details-marker]:hidden">
+                Settings
+                <span className="text-sm text-indigo-600">{mobileSettingsOpen ? "Hide" : "Show"}</span>
+              </summary>
+              <div className="border-t border-neutral-200 dark:border-neutral-800 px-4 pb-4 pt-4 sm:px-6 space-y-5">
+                {settingsForm}
               </div>
-              <p className="text-xs text-neutral-500 mt-1">We download as a blob to keep the canvas untainted.</p>
+            </details>
+          </section>
+        ) : (
+          <section className="lg:col-span-2">
+            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 sm:p-6 bg-white dark:bg-neutral-950 shadow-sm space-y-5">
+              <h2 className="text-lg font-semibold">Settings</h2>
+              {settingsForm}
             </div>
-
-            <div className="pt-1 text-xs text-neutral-500 leading-relaxed">
-              <p><strong>Tips:</strong> Paste with ⌘/Ctrl+V. Big widths (200–300) look sharper but render slower. If your iPhone photo is HEIC, export as JPEG/PNG first (screenshot also works). Enable Messenger-friendly for WhatsApp/iMessage-safe spacing inside a monospace code block.</p>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
       </main>
 
       <footer className="mx-auto max-w-6xl px-4 pb-10 text-xs text-neutral-500">
