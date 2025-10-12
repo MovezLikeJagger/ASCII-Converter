@@ -87,7 +87,6 @@ export default function AsciiArtApp() {
   const [colorize, setColorize] = useState(DEFAULTS.colorize);
   const [messengerFriendly, setMessengerFriendly] = useState(false);
   const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
-  const [busy, setBusy] = useState(false);
 
   const conversionIdRef = useRef(0);
   const activeConversionRef = useRef(0);
@@ -237,7 +236,6 @@ export default function AsciiArtApp() {
     setImgMeta({ w: 0, h: 0 });
     resetAscii();
     activeConversionRef.current = 0;
-    setBusy(false);
   }
 
   function reportError(msg) {
@@ -290,7 +288,6 @@ export default function AsciiArtApp() {
 
   async function importFromUrl(raw) {
     try {
-      setBusy(true);
       setError("");
       const clean = (raw || urlField).trim();
       if (!clean) return;
@@ -309,10 +306,6 @@ export default function AsciiArtApp() {
     } catch (e) {
       console.error(e);
       reportError("Couldn’t fetch that image URL. Tip: open it in a new tab and copy the direct image link.");
-    } finally {
-      if (activeConversionRef.current === 0) {
-        setBusy(false);
-      }
     }
   }
 
@@ -321,7 +314,6 @@ export default function AsciiArtApp() {
     const jobId = conversionIdRef.current + 1;
     conversionIdRef.current = jobId;
     activeConversionRef.current = jobId;
-    setBusy(true);
     try {
       const result = await imageUrlToAscii({
         url,
@@ -347,7 +339,6 @@ export default function AsciiArtApp() {
     } finally {
       if (activeConversionRef.current === jobId) {
         activeConversionRef.current = 0;
-        setBusy(false);
       }
     }
   }
