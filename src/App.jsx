@@ -34,6 +34,21 @@ const DEFAULTS = {
 // Typical monospace character aspect ratio (height / width).
 const CHAR_ASPECT = 2.0;
 
+// Scratch buffers reused between conversions to reduce allocations/GC pressure.
+const bufferCache = {
+  brightness: null,
+  quantized: null,
+};
+
+// Reuse a single canvas/context per conversion to avoid DOM churn.
+const scratchCanvas = {
+  canvas: null,
+  ctx: null,
+};
+
+// Cache decoded images so repeated conversions (changing sliders) don't trigger re-decode.
+const imageCache = new Map();
+
 // Mime types that decode reliably across browsers/canvases in this preview
 const SUPPORTED_TYPES = new Set([
   "image/jpeg",
@@ -87,7 +102,15 @@ export default function AsciiArtApp() {
   );
 
   // Clean up object URLs
-  useEffect(() => () => { if (objectUrl) URL.revokeObjectURL(objectUrl); }, [objectUrl]);
+  useEffect(
+    () => () => {
+      if (objectUrl) {
+        releaseCachedImage(objectUrl);
+        URL.revokeObjectURL(objectUrl);
+      }
+    },
+    [objectUrl],
+  );
 
   // Drag & Drop + overlay input wiring
   useEffect(() => {
@@ -141,7 +164,11 @@ export default function AsciiArtApp() {
   }
 
   function clearImage() {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    if (objectUrl) {
+      releaseCachedImage(objectUrl);
+      URL.revokeObjectURL(objectUrl);
+    }
+    releaseCachedImage(imageUrl);
     setObjectUrl("");
     setImageUrl("");
     setImgMeta({ w: 0, h: 0 });
@@ -184,6 +211,7 @@ export default function AsciiArtApp() {
 
     // Read via object URL
     const url = URL.createObjectURL(file);
+    releaseCachedImage(imageUrl);
     loadImageMeta(url)
       .then((meta) => {
         if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -210,6 +238,7 @@ export default function AsciiArtApp() {
       if (!res || (res.status && res.status >= 400)) throw new Error(`HTTP ${res?.status || "error"}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
+      releaseCachedImage(imageUrl);
       const meta = await loadImageMeta(url);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setObjectUrl(url);
@@ -394,6 +423,7 @@ export default function AsciiArtApp() {
     const grd = g.createLinearGradient(0,0,240,160); grd.addColorStop(0,'#111'); grd.addColorStop(1,'#ddd');
     g.fillStyle = grd; g.fillRect(0,0,240,160);
     const url = c.toDataURL('image/png');
+    releaseCachedImage(imageUrl);
     loadImageMeta(url).then(meta => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setObjectUrl("");
@@ -561,12 +591,10 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   // Compute target rows using aspect compensation
   const rows = Math.max(1, Math.round((imgH / imgW) * (targetCols / CHAR_ASPECT)));
 
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  canvas.width = targetCols;
-  canvas.height = rows;
+  const { canvas, ctx } = getScratchContext(targetCols, rows);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const img = await loadImage(url);
+  const img = await loadImageCached(url);
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -585,7 +613,9 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   }
 
   const totalPixels = rows * targetCols;
-  const brightness = new Float32Array(totalPixels);
+  const { brightness, quantized } = acquireAsciiBuffers(totalPixels);
+  brightness.fill(0);
+  quantized.fill(0);
 
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < targetCols; x++) {
@@ -597,8 +627,6 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
       brightness[idx] = bright(r, g, b);
     }
   }
-
-  const quantized = new Uint16Array(totalPixels);
 
   if (n <= 1) {
     // No ramp variance: all pixels map to the single available glyph.
@@ -670,23 +698,60 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   return { text, html, cells };
 }
 
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    // For object URLs/data URLs CORS is irrelevant. For remote URLs, we fetched as blob.
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
+function acquireAsciiBuffers(size) {
+  if (!bufferCache.brightness || bufferCache.brightness.length < size) {
+    bufferCache.brightness = new Float32Array(size);
+    bufferCache.quantized = new Uint16Array(size);
+  }
+  return {
+    brightness: bufferCache.brightness.subarray(0, size),
+    quantized: bufferCache.quantized.subarray(0, size),
+  };
 }
 
-function loadImageMeta(url) {
-  return new Promise((resolve, reject) => {
+function getScratchContext(width, height) {
+  if (!scratchCanvas.canvas) {
+    scratchCanvas.canvas = document.createElement("canvas");
+    scratchCanvas.ctx = scratchCanvas.canvas.getContext("2d", { willReadFrequently: true });
+  }
+  if (!scratchCanvas.ctx) {
+    throw new Error("Canvas context unavailable");
+  }
+  if (scratchCanvas.canvas.width !== width || scratchCanvas.canvas.height !== height) {
+    scratchCanvas.canvas.width = width;
+    scratchCanvas.canvas.height = height;
+  }
+  return scratchCanvas;
+}
+
+function loadImageCached(url) {
+  if (!url) return Promise.reject(new Error("Missing image URL"));
+  if (imageCache.has(url)) {
+    return imageCache.get(url);
+  }
+  const promise = new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve({ w: img.width, h: img.height });
-    img.onerror = reject;
+    img.onload = () => resolve(img);
+    img.onerror = (err) => {
+      imageCache.delete(url);
+      reject(err);
+    };
     img.src = url;
   });
+  imageCache.set(url, promise);
+  return promise;
+}
+
+async function loadImageMeta(url) {
+  const img = await loadImageCached(url);
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  return { w, h };
+}
+
+function releaseCachedImage(url) {
+  if (!url) return;
+  imageCache.delete(url);
 }
 
 function escapeHtml(str) {
