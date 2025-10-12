@@ -66,6 +66,16 @@ export default function AsciiArtApp() {
 
   const [urlField, setUrlField] = useState("");
 
+  const overlayInputDisabled = Boolean(imageUrl);
+  const overlayInputClassName = useMemo(
+    () =>
+      [
+        "absolute inset-0 opacity-0",
+        overlayInputDisabled ? "pointer-events-none" : "cursor-pointer",
+      ].join(" "),
+    [overlayInputDisabled],
+  );
+
   const charset = useMemo(() => CHARSETS[charsetIndex].set, [charsetIndex]);
 
   const rows = useMemo(() => {
@@ -351,9 +361,10 @@ export default function AsciiArtApp() {
               type="file"
               accept="image/*"
               capture="environment"
-              className={`absolute inset-0 opacity-0 ${imageUrl ? "pointer-events-none" : "cursor-pointer"}`}
-              tabIndex={imageUrl ? -1 : 0}
-              aria-hidden={imageUrl ? "true" : undefined}
+              className={overlayInputClassName}
+              {...(overlayInputDisabled
+                ? { tabIndex: -1, "aria-hidden": "true" }
+                : { tabIndex: 0 })}
               title=""
               onChange={onFileChange}
               onClick={(e) => { e.target.value = null; }}
