@@ -60,6 +60,7 @@ const EMPTY_FLOAT32 = new Float32Array(0);
 
 // Cache decoded images so repeated conversions (changing sliders) don't trigger re-decode.
 const imageCache = new Map();
+const personDetectionCache = new Map();
 
 // Mime types that decode reliably across browsers/canvases in this preview
 const SUPPORTED_TYPES = new Set([
@@ -87,6 +88,7 @@ export default function AsciiArtApp() {
   const [colorize, setColorize] = useState(DEFAULTS.colorize);
   const [messengerFriendly, setMessengerFriendly] = useState(false);
   const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
+  const [personDetectionEnabled, setPersonDetectionEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const [asciiText, setAsciiText] = useState("");
@@ -215,7 +217,7 @@ export default function AsciiArtApp() {
     const id = setTimeout(() => convertToAscii(imageUrl, imgMeta.w, imgMeta.h), 60);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cols, charset, invert, gamma, colorize]);
+  }, [cols, charset, invert, gamma, colorize, personDetectionEnabled]);
 
   function resetAscii() {
     setAsciiText("");
@@ -322,6 +324,7 @@ export default function AsciiArtApp() {
         invert,
         gamma,
         colorize,
+        isolatePeople: personDetectionEnabled,
       });
       setAsciiText(result.text);
       setAsciiHtml(result.html);
@@ -578,6 +581,10 @@ export default function AsciiArtApp() {
         />
       </div>
 
+      <p className="text-xs text-neutral-500">
+        When person isolation is on, the app uses on-device machine learning to locate people and only renders those areas in ASCII.
+      </p>
+
       <div>
         <label className="block mb-1 text-sm">Character set</label>
         <select
@@ -620,6 +627,14 @@ export default function AsciiArtApp() {
         </label>
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" checked={colorize} onChange={(e) => setColorize(e.target.checked)} /> Colorize
+        </label>
+        <label className="inline-flex items-center gap-2" title="Detects people and removes everything else from the ASCII render.">
+          <input
+            type="checkbox"
+            checked={personDetectionEnabled}
+            onChange={(e) => setPersonDetectionEnabled(e.target.checked)}
+          />
+          Isolate detected people
         </label>
         <label
           className="inline-flex items-center gap-2"
@@ -859,7 +874,7 @@ export default function AsciiArtApp() {
   );
 }
 
-async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, gamma, colorize }) {
+async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, gamma, colorize, isolatePeople }) {
   // Compute target rows using aspect compensation
   const rows = Math.max(1, Math.round((imgH / imgW) * (targetCols / CHAR_ASPECT)));
 
@@ -867,9 +882,62 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const img = await loadImageCached(url);
+
+  let scaledPersonBoxes = null;
+  if (isolatePeople) {
+    try {
+      const detections = await getCachedPersonDetections(url, img);
+      if (detections?.length) {
+        const naturalW = img.naturalWidth || imgW || img.width || canvas.width;
+        const naturalH = img.naturalHeight || imgH || img.height || canvas.height;
+        const scaleX = naturalW ? canvas.width / naturalW : 1;
+        const scaleY = naturalH ? canvas.height / naturalH : 1;
+        scaledPersonBoxes = detections.map(({ bbox }) => {
+          const [x, y, width, height] = bbox;
+          const x1 = x * scaleX;
+          const y1 = y * scaleY;
+          const x2 = (x + width) * scaleX;
+          const y2 = (y + height) * scaleY;
+          return { x1, y1, x2, y2 };
+        });
+      }
+    } catch (err) {
+      console.warn("Person detection failed; rendering full image instead.", err);
+    }
+  }
+
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  let maskedPixels = null;
+  const shouldIsolate = Array.isArray(scaledPersonBoxes) && scaledPersonBoxes.length > 0;
+  if (shouldIsolate) {
+    maskedPixels = new Uint8Array(rows * targetCols);
+    const fillValue = invert ? 0 : 255;
+    for (let y = 0; y < rows; y++) {
+      const py = y + 0.5;
+      for (let x = 0; x < targetCols; x++) {
+        const px = x + 0.5;
+        let inside = false;
+        for (const box of scaledPersonBoxes) {
+          if (px >= box.x1 && px <= box.x2 && py >= box.y1 && py <= box.y2) {
+            inside = true;
+            break;
+          }
+        }
+        if (!inside) {
+          const idx = y * targetCols + x;
+          const dataIdx = idx * 4;
+          maskedPixels[idx] = 1;
+          data[dataIdx + 0] = fillValue;
+          data[dataIdx + 1] = fillValue;
+          data[dataIdx + 2] = fillValue;
+          data[dataIdx + 3] = 255;
+        }
+      }
+    }
+  }
 
   const ramp = charset?.ramp || "";
   const levels = charset?.levels || EMPTY_FLOAT32;
@@ -953,8 +1021,9 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
       const r = data[dataIdx + 0];
       const g = data[dataIdx + 1];
       const b = data[dataIdx + 2];
+      const masked = maskedPixels && maskedPixels[idx] === 1;
       const i = n > 1 ? quantized[idx] : 0;
-      const ch = ramp[i];
+      const ch = masked ? " " : ramp[i];
       rowTxt += ch;
       rowCells[x] = { char: ch, r, g, b };
       if (colorize) {
@@ -1050,6 +1119,7 @@ async function loadImageMeta(url) {
 function releaseCachedImage(url) {
   if (!url) return;
   imageCache.delete(url);
+  personDetectionCache.delete(url);
 }
 
 function escapeHtml(str) {
@@ -1168,4 +1238,55 @@ function quantizeToLevels(value, levels) {
     return { index: lo, value: lowVal };
   }
   return { index: hi, value: highVal };
+}
+
+const MIN_PERSON_SCORE = 0.5;
+let personDetectorPromise = null;
+
+async function getCachedPersonDetections(url, img) {
+  if (!url || !img) return [];
+  if (personDetectionCache.has(url)) {
+    return personDetectionCache.get(url);
+  }
+  const detectionPromise = detectPeopleInImage(img)
+    .then((boxes) => {
+      const resolved = Array.isArray(boxes) ? boxes : [];
+      personDetectionCache.set(url, Promise.resolve(resolved));
+      return resolved;
+    })
+    .catch((err) => {
+      personDetectionCache.delete(url);
+      throw err;
+    });
+  personDetectionCache.set(url, detectionPromise);
+  return detectionPromise;
+}
+
+async function loadPersonDetector() {
+  if (personDetectorPromise) {
+    return personDetectorPromise;
+  }
+  personDetectorPromise = Promise.all([import("@tensorflow/tfjs"), import("@tensorflow-models/coco-ssd")])
+    .then(([, cocoSsd]) => cocoSsd.load({ base: "lite_mobilenet_v2" }))
+    .catch((err) => {
+      personDetectorPromise = null;
+      throw err;
+    });
+  return personDetectorPromise;
+}
+
+async function detectPeopleInImage(img) {
+  if (typeof window === "undefined" || !img) {
+    return [];
+  }
+  try {
+    const detector = await loadPersonDetector();
+    const predictions = await detector.detect(img, undefined, MIN_PERSON_SCORE);
+    return predictions
+      .filter((prediction) => prediction.class === "person" && prediction.score >= MIN_PERSON_SCORE)
+      .map((prediction) => ({ bbox: prediction.bbox, score: prediction.score }));
+  } catch (err) {
+    console.error("Person detection error", err);
+    return [];
+  }
 }
