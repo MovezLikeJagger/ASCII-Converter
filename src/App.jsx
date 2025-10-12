@@ -392,7 +392,13 @@ export default function AsciiArtApp() {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
-  function renderAsciiToCanvas({ textColor, backgroundColor }) {
+  function renderAsciiToCanvas({
+    textColor,
+    backgroundColor,
+    targetWidth,
+    targetHeight,
+    scale = 1,
+  }) {
     if (!asciiCells.length) return null;
     const rowCount = asciiCells.length;
     const colCount = asciiCells[0]?.length || 0;
@@ -406,23 +412,58 @@ export default function AsciiArtApp() {
 
     ctx.font = font;
     const metrics = ctx.measureText("M");
-    const charWidth = metrics.width || fontSize * 0.6;
-    const lineHeight = fontSize;
+    const charWidth = metrics.width || fontSize * 0.6 || 1;
+    const lineHeight = fontSize || 1;
 
-    canvas.width = Math.ceil(colCount * charWidth);
-    canvas.height = Math.ceil(rowCount * lineHeight);
+    const baseWidth = Math.max(colCount * charWidth, 1);
+    const baseHeight = Math.max(rowCount * lineHeight, 1);
 
+    let scaleX = scale;
+    let scaleY = scale;
+
+    if (targetWidth) {
+      const ratio = targetWidth / baseWidth;
+      if (Number.isFinite(ratio) && ratio > 0) {
+        scaleX = ratio;
+      }
+    }
+    if (targetHeight) {
+      const ratio = targetHeight / baseHeight;
+      if (Number.isFinite(ratio) && ratio > 0) {
+        scaleY = ratio;
+      }
+    }
+
+    if (!Number.isFinite(scaleX) || scaleX <= 0) scaleX = 1;
+    if (!Number.isFinite(scaleY) || scaleY <= 0) scaleY = 1;
+
+    let finalWidth = Math.max(1, Math.round(baseWidth * scaleX));
+    let finalHeight = Math.max(1, Math.round(baseHeight * scaleY));
+
+    if (targetWidth) {
+      finalWidth = Math.max(1, Math.round(targetWidth));
+      scaleX = finalWidth / baseWidth;
+    }
+    if (targetHeight) {
+      finalHeight = Math.max(1, Math.round(targetHeight));
+      scaleY = finalHeight / baseHeight;
+    }
+
+    canvas.width = finalWidth;
+    canvas.height = finalHeight;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.font = font;
     ctx.textBaseline = "top";
     ctx.textAlign = "left";
 
     if (!colorize) {
       ctx.fillStyle = backgroundColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, baseWidth, baseHeight);
       ctx.fillStyle = textColor;
     } else if (backgroundColor) {
       ctx.fillStyle = backgroundColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, baseWidth, baseHeight);
     }
 
     for (let y = 0; y < rowCount; y++) {
@@ -454,23 +495,26 @@ export default function AsciiArtApp() {
 
   function downloadPng() {
     const canvas = renderAsciiToCanvas({ textColor: "#000000", backgroundColor: "#ffffff" });
-    if (!canvas) return;
-
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = "ascii-art.png";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-    }, "image/png");
+    triggerCanvasDownload(canvas, "ascii-art.png");
   }
 
   function downloadOledPng() {
     const canvas = renderAsciiToCanvas({ textColor: "#ffffff", backgroundColor: "#000000" });
+    triggerCanvasDownload(canvas, "ascii-art-oled.png");
+  }
+
+  function downloadFullResPng() {
+    if (!imgMeta.w || !imgMeta.h) return;
+    const canvas = renderAsciiToCanvas({
+      textColor: "#000000",
+      backgroundColor: "#ffffff",
+      targetWidth: imgMeta.w,
+      targetHeight: imgMeta.h,
+    });
+    triggerCanvasDownload(canvas, "ascii-art-full.png");
+  }
+
+  function triggerCanvasDownload(canvas, filename) {
     if (!canvas) return;
 
     canvas.toBlob((blob) => {
@@ -478,7 +522,7 @@ export default function AsciiArtApp() {
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = "ascii-art-oled.png";
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -672,6 +716,13 @@ export default function AsciiArtApp() {
               className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
             >
               Download PNG
+            </button>
+            <button
+              onClick={downloadFullResPng}
+              disabled={!asciiCells.length || !imgMeta.w || !imgMeta.h}
+              className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
+            >
+              Download PNG (Full Res)
             </button>
             <button
               onClick={downloadOledPng}
