@@ -35,6 +35,15 @@ const DEFAULTS = {
   fontSize: 12,
 };
 
+const HERO_ASCII_TITLE = `
+   ___   ____   ____ ___ ___      ____                      _             
+  / _ \\ / ___| / ___|_ _/ _ \\    / ___|___  _ __ ___  _ __ | | ___  _   _ 
+ | | | | |     \\___ \\| | | | |  | |   / _ \\| '_   _ \\| '_ \\| |/ _ \\| | | |
+ | |_| | |___   ___) | | |_| |  | |__| (_) | | | | | | |_) | | (_) | |_| |
+  \\___/ \\____| |____/___\\___/    \\____\\___/|_| |_| |_| .__/|_|\\___/ \\__, |
+                                                      |_|            |___/ 
+`.replace(/^\n/, "");
+
 // Typical monospace character aspect ratio (height / width).
 const CHAR_ASPECT = 2.0;
 
@@ -138,10 +147,10 @@ export default function AsciiArtApp() {
     const el = dropRef.current;
     if (!el) return;
 
-    const onDragOver = (e) => { e.preventDefault(); el.classList.add("ring-2","ring-indigo-500"); };
-    const onDragLeave = (e) => { e.preventDefault(); el.classList.remove("ring-2","ring-indigo-500"); };
+    const onDragOver = (e) => { e.preventDefault(); el.classList.add("ring-2", "ring-emerald-400"); };
+    const onDragLeave = (e) => { e.preventDefault(); el.classList.remove("ring-2", "ring-emerald-400"); };
     const onDrop = (e) => {
-      e.preventDefault(); el.classList.remove("ring-2","ring-indigo-500");
+      e.preventDefault(); el.classList.remove("ring-2", "ring-emerald-400");
       const files = e.dataTransfer?.files; if (files && files.length) handleFiles(files);
     };
 
@@ -567,7 +576,8 @@ export default function AsciiArtApp() {
     });
   }
 
-  const actionButtonSizing = isMobileLayout ? "flex-1 min-w-[140px]" : "";
+  const actionButtonSizing = isMobileLayout ? "flex-1 min-w-[120px]" : "";
+  const headerButtonBase = `wd-action wd-hero__action ${actionButtonSizing}`;
   const settingsForm = (
     <>
       <div>
@@ -590,7 +600,7 @@ export default function AsciiArtApp() {
         <select
           value={charsetIndex}
           onChange={(e) => setCharsetIndex(parseInt(e.target.value))}
-          className="w-full rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent p-2"
+          className="wd-input w-full"
         >
           {CHARSETS.map((c, i) => (
             <option key={c.name} value={i}>
@@ -664,16 +674,17 @@ export default function AsciiArtApp() {
             placeholder="https://example.com/picture.jpg"
             value={urlField}
             onChange={(e) => setUrlField(e.target.value)}
-            className="flex-1 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent p-2"
+            className="wd-input flex-1"
           />
           <button
             onClick={() => importFromUrl()}
-            className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${isMobileLayout ? "min-w-[96px]" : ""}`}
+            className={`wd-action ${isMobileLayout ? "min-w-[120px]" : ""}`}
+            data-tone="cyan"
           >
             Load
           </button>
         </div>
-        <p className="text-xs text-neutral-500 mt-1">We download as a blob to keep the canvas untainted.</p>
+        <p className="mt-2 text-xs text-slate-400/70">We download as a blob to keep the canvas untainted.</p>
       </div>
 
       <div className="pt-1 text-xs text-neutral-500 leading-relaxed">
@@ -688,59 +699,72 @@ export default function AsciiArtApp() {
   );
 
   return (
-    <div className="min-h-screen w-full bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
-      <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40 border-b border-neutral-200/60 dark:border-neutral-800/60">
-        <div
-          className={`mx-auto max-w-6xl px-4 py-3 flex ${
-            isMobileLayout ? "flex-col gap-3" : "items-center justify-between"
-          } sm:flex-row sm:items-center sm:justify-between`}
-        >
-          <h1 className={`text-xl sm:text-2xl font-semibold ${isMobileLayout ? "sm:flex-1" : ""}`}>
-            ASCII Art Image App
-          </h1>
+    <div className="wd-app-shell min-h-screen w-full text-slate-100">
+      <header className="wd-hero sticky top-0 z-20">
+        <div className="wd-hero__grid" aria-hidden />
+        <div className="wd-hero__noise" aria-hidden />
+        <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
+          <div className="max-w-2xl space-y-4">
+            <div className="wd-hero__eyebrow">ASCII.CONSOLE // WATCH_DOGS SIGNAL</div>
+            <h1 className="wd-hero__title">
+              <span className="sr-only">ASCII Converter. Signal intercepted. Render images as ASCII.</span>
+              <div className="wd-hero__title-frame" aria-hidden="true">
+                <pre>{HERO_ASCII_TITLE}</pre>
+              </div>
+            </h1>
+            <p className="wd-hero__subtitle">
+              Jack into a monochrome grid inspired by DedSec. Feed it screenshots, photos, or glitch captures—then export razor-sharp ASCII payloads for terminals, chats, or OLED wallpapers.
+            </p>
+            <div className="wd-hero__ascii">
+              <pre>{`01000001 01010011 01000011 01001001 01001001\n>> decode.frame(signal);`}</pre>
+            </div>
+          </div>
           <div
-            className={`flex gap-2 ${
-              isMobileLayout ? "flex-wrap w-full justify-start sm:justify-end" : ""
+            className={`wd-hero__actions relative flex flex-wrap gap-2.5 ${
+              isMobileLayout ? "w-full" : "justify-end"
             }`}
           >
             <button
               onClick={copyToClipboard}
               disabled={!asciiText}
-              className={`px-3 py-2 rounded-2xl bg-neutral-900 text-white disabled:opacity-40 ${actionButtonSizing}`}
+              className={headerButtonBase}
+              data-tone="slate"
             >
               Copy
             </button>
             <button
               onClick={downloadFile}
               disabled={!asciiText}
-              className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
+              className={headerButtonBase}
+              data-tone="slate"
             >
               Download
             </button>
             <button
               onClick={downloadPng}
               disabled={!asciiCells.length}
-              className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
+              className={headerButtonBase}
+              data-tone="cyan"
             >
               Download PNG
             </button>
             <button
               onClick={downloadFullResPng}
               disabled={!asciiCells.length || !imgMeta.w || !imgMeta.h}
-              className={`px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800 ${actionButtonSizing}`}
+              className={headerButtonBase}
+              data-tone="indigo"
             >
               Download PNG (Full Res)
             </button>
             <button
               onClick={downloadOledPng}
               disabled={!asciiCells.length}
-              className={`px-3 py-2 rounded-2xl bg-neutral-900 text-white ${actionButtonSizing}`}
+              className={headerButtonBase}
+              data-tone="emerald"
             >
               Download OLED PNG
             </button>
-            <label
-              className={`px-3 py-2 rounded-2xl bg-indigo-600 text-white cursor-pointer ${actionButtonSizing}`}
-            >
+            <label className={`${headerButtonBase} cursor-pointer`} data-tone="violet">
               Upload
               <input
                 type="file"
@@ -758,16 +782,16 @@ export default function AsciiArtApp() {
       </header>
 
       <main
-        className={`mx-auto max-w-6xl px-4 py-6 ${
-          isMobileLayout ? "flex flex-col gap-6" : "grid grid-cols-1 lg:grid-cols-5 gap-6"
+        className={`mx-auto max-w-6xl px-4 py-10 ${
+          isMobileLayout ? "flex flex-col gap-8" : "grid grid-cols-1 lg:grid-cols-5 gap-8"
         }`}
       >
         {/* Dropzone / Preview */}
         <section className={isMobileLayout ? "w-full" : "lg:col-span-3"}>
           <div
             ref={dropRef}
-            className={`relative border border-dashed rounded-3xl border-neutral-300 dark:border-neutral-700 transition hover:bg-neutral-100/40 dark:hover:bg-neutral-900/40 ${
-              isMobileLayout ? "p-5 min-h-[220px]" : "p-6 sm:p-8 min-h-[260px]"
+            className={`wd-panel--inset relative overflow-hidden rounded-3xl transition ${
+              isMobileLayout ? "p-6 min-h-[240px]" : "p-8 min-h-[320px]"
             }`}
           >
             {/* Full-area invisible input overlay for bulletproof tapping/clicking on mobile */}
@@ -784,30 +808,33 @@ export default function AsciiArtApp() {
             )}
 
             {!imageUrl ? (
-              <div className="text-center pointer-events-none">
-                <div className="text-5xl mb-2">🖼️➡️🔠</div>
-                <p className="text-base">
+              <div className="pointer-events-none text-center">
+                <div className="wd-panel__header mb-4">Input channel idle</div>
+                <div className="text-4xl sm:text-5xl font-semibold tracking-[0.4em] text-cyan-200/70">
+                  ▛▞▚▚▞▟
+                </div>
+                <p className="mt-4 text-sm text-slate-300/80">
                   {isMobileLayout
-                    ? "Tap Upload above or anywhere in this box to choose or snap a photo"
-                    : "Drop, paste, click, or tap anywhere to choose an image"}
+                    ? "Tap Upload above or anywhere inside this field to jack in a photo or snap a shot."
+                    : "Drop, paste, or click to uplink an image. Clipboard intercepts with ⌘/Ctrl+V are armed."}
                 </p>
-                <p className="text-sm text-neutral-500 mt-2">
-                  {isMobileLayout
-                    ? "PNG / JPG / WEBP / GIF / BMP • Works great with the iPhone camera • Or paste an image link below"
-                    : "PNG / JPG / WEBP / GIF / BMP • Paste with ⌘/Ctrl+V • Or use an image URL below"}
+                <p className="mt-3 text-xs uppercase tracking-[0.3em] text-slate-400/70">
+                  PNG • JPG • WEBP • GIF • BMP
                 </p>
-                <div className="mt-3">
-                  <button onClick={loadDemo} className="pointer-events-auto px-3 py-2 rounded-2xl bg-neutral-200 dark:bg-neutral-800">Try a demo</button>
+                <div className="mt-5 flex justify-center">
+                  <button onClick={loadDemo} className="pointer-events-auto wd-action" data-tone="cyan">
+                    Load Demo Signal
+                  </button>
                 </div>
               </div>
             ) : (
               <div className="w-full">
-                <div className="mb-3 flex items-center justify-between text-xs text-neutral-500">
+                <div className="mb-4 flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-400/70">
                   <div>Image: {imgMeta.w}×{imgMeta.h}px</div>
-                  <button onClick={clearImage} className="underline">Clear</button>
+                  <button onClick={clearImage} className="text-cyan-200 hover:text-cyan-100">Clear</button>
                 </div>
-                <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-black">
-                  <div className="max-h-[60vh] overflow-x-auto overflow-y-auto p-3">
+                <div className="wd-panel rounded-2xl">
+                  <div className="max-h-[60vh] overflow-x-auto overflow-y-auto p-4 sm:p-5">
                     {colorize ? (
                       <div
                         style={previewTextStyle}
@@ -825,7 +852,7 @@ export default function AsciiArtApp() {
             )}
 
             {error && (
-              <div className="mt-3 text-xs text-red-600 dark:text-red-400">{error}</div>
+              <div className="mt-3 text-xs uppercase tracking-[0.3em] text-rose-300/80">{error}</div>
             )}
           </div>
         </section>
@@ -834,30 +861,30 @@ export default function AsciiArtApp() {
         {isMobileLayout ? (
           <section className="lg:col-span-2">
             <details
-              className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 shadow-sm"
+              className="wd-panel rounded-3xl"
               open={mobileSettingsOpen}
               onToggle={(event) => setMobileSettingsOpen(event.target.open)}
             >
               <summary className="flex items-center justify-between gap-2 px-4 py-3 text-base font-semibold cursor-pointer select-none [&::-webkit-details-marker]:hidden">
-                Settings
-                <span className="text-sm text-indigo-600">{mobileSettingsOpen ? "Hide" : "Show"}</span>
+                <span className="uppercase tracking-[0.3em] text-slate-300/80">Settings</span>
+                <span className="text-xs uppercase tracking-[0.3em] text-cyan-200/80">{mobileSettingsOpen ? "Hide" : "Show"}</span>
               </summary>
-              <div className="border-t border-neutral-200 dark:border-neutral-800 px-4 pb-4 pt-4 sm:px-6 space-y-5">
+              <div className="border-t border-slate-700/50 px-4 pb-4 pt-4 sm:px-6 space-y-5">
                 {settingsForm}
               </div>
             </details>
           </section>
         ) : (
           <section className="lg:col-span-2">
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 sm:p-6 bg-white dark:bg-neutral-950 shadow-sm space-y-5">
-              <h2 className="text-lg font-semibold">Settings</h2>
+            <div className="wd-panel rounded-3xl p-4 sm:p-6 space-y-5">
+              <h2 className="text-lg font-semibold uppercase tracking-[0.3em] text-slate-300/80">Settings</h2>
               {settingsForm}
             </div>
           </section>
         )}
       </main>
 
-      <footer className="mx-auto max-w-6xl px-4 pb-10 text-xs text-neutral-500">
+      <footer className="mx-auto max-w-6xl px-4 pb-12 text-xs wd-footer">
         Built for fun. All processing stays in your browser.
       </footer>
     </div>
