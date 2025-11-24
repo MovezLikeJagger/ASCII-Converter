@@ -336,8 +336,9 @@ export default function AsciiArtApp() {
         invert,
         gamma,
         colorize,
+        isCancelled: () => activeConversionRef.current !== jobId,
       });
-      if (activeConversionRef.current !== jobId) {
+      if (!result || activeConversionRef.current !== jobId) {
         return;
       }
       setAsciiText(result.text);
@@ -896,17 +897,30 @@ export default function AsciiArtApp() {
   );
 }
 
-async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, gamma, colorize }) {
+async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, gamma, colorize, isCancelled }) {
+  const cancelled = typeof isCancelled === "function" ? isCancelled : () => false;
+  if (!url || !imgW || !imgH) {
+    return null;
+  }
   // Compute target rows using aspect compensation
   const rows = Math.max(1, Math.round((imgH / imgW) * (targetCols / CHAR_ASPECT)));
+  if (!Number.isFinite(targetCols) || targetCols <= 0 || cancelled()) {
+    return null;
+  }
 
   const { canvas, ctx } = getScratchContext(targetCols, rows);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const img = await loadImageCached(url);
+  if (cancelled()) {
+    return null;
+  }
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (cancelled()) {
+    return null;
+  }
 
   const ramp = charset?.ramp || "";
   const levels = charset?.levels || EMPTY_FLOAT32;
@@ -932,6 +946,9 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   quantized.fill(0);
 
   for (let y = 0; y < rows; y++) {
+    if (cancelled()) {
+      return null;
+    }
     for (let x = 0; x < targetCols; x++) {
       const idx = y * targetCols + x;
       const dataIdx = idx * 4;
@@ -951,6 +968,9 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
     const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
     for (let y = 0; y < rows; y++) {
+      if (cancelled()) {
+        return null;
+      }
       for (let x = 0; x < targetCols; x++) {
         const idx = y * targetCols + x;
         const oldPixel = brightness[idx];
@@ -981,6 +1001,9 @@ async function imageUrlToAscii({ url, targetCols, imgW, imgH, charset, invert, g
   }
 
   for (let y = 0; y < rows; y++) {
+    if (cancelled()) {
+      return null;
+    }
     let rowTxt = "";
     let rowHtml = "";
     const rowCells = new Array(targetCols);
