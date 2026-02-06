@@ -372,6 +372,12 @@ export default function AsciiArtApp() {
 
   function copyToClipboard() {
     if (!asciiText) return;
+    const hasClipboardApi = typeof navigator !== "undefined" && navigator.clipboard;
+    if (!hasClipboardApi) {
+      toast("Copy not supported in this browser");
+      return;
+    }
+
     if (messengerFriendly) {
       const payload = formatForMessenger(asciiText);
       if (!payload) return;
@@ -381,19 +387,31 @@ export default function AsciiArtApp() {
         .catch(() => toast("Copy failed"));
       return;
     }
+
     if (colorize && asciiHtml) {
       const htmlPayload = colorizedPreviewHtml(fontSize, asciiHtml, previewMinWidth);
       const blob = new Blob([htmlPayload], { type: "text/html" });
-      const item = new ClipboardItem({ "text/html": blob });
-      navigator.clipboard.write([item])
-        .then(() => toast("HTML copied ✨"))
-        .catch(async () => {
-          await navigator.clipboard.writeText(asciiText);
-          toast("Plain text copied (HTML fallback)");
-        });
-    } else {
-      navigator.clipboard.writeText(asciiText).then(() => toast("Copied!"));
+      if (typeof ClipboardItem === "function") {
+        const item = new ClipboardItem({ "text/html": blob });
+        navigator.clipboard.write([item])
+          .then(() => toast("HTML copied ✨"))
+          .catch(() => {
+            navigator.clipboard.writeText(asciiText)
+              .then(() => toast("Plain text copied (HTML fallback)"))
+              .catch(() => toast("Copy failed"));
+          });
+      } else {
+        navigator.clipboard.writeText(asciiText)
+          .then(() => toast("Plain text copied (HTML unsupported)"))
+          .catch(() => toast("Copy failed"));
+      }
+      return;
     }
+
+    navigator.clipboard
+      .writeText(asciiText)
+      .then(() => toast("Copied!"))
+      .catch(() => toast("Copy failed"));
   }
 
   function downloadFile() {
